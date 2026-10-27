@@ -17,8 +17,7 @@ std::string money(double value) {
     return out.str();
 }
 // МЕНЮ. Одиночное наследование: MenuItem <- Dish, Drink
-// Абстрактный базовый класс. «Просто позиции меню» не бывает - это всегда блюдо или напиток,
-// поэтому объект MenuItem создать нельзя (в классе есть чисто виртуальные методы).
+// Абстрактный базовый класс. Просто позиции меню не бывает - это всегда блюдо или напиток поэтому объект MenuItem создать нельзя (в классе есть чисто виртуальные методы)
 class MenuItem {
 public:
     MenuItem(std::string name, double price) : name_(std::move(name)), price_(price) {
@@ -194,14 +193,12 @@ public:
         tables_.push_back(std::make_unique<Table>(number, seats));
         return tables_.back().get();
     }
-    // АГРЕГАЦИЯ: ресторан хранит указатели на официантов, но не создаёт и не удаляет их -
-    // официанты существуют сами по себе (могут уйти работать в другой ресторан).
+    // АГРЕГАЦИЯ: ресторан хранит указатели на официантов но не создаёт и не удаляет их - официанты существуют сами по себе (могут уйти работать в другой ресторан).
     void hireWaiter(Waiter* waiter) {
         if (!waiter) throw std::invalid_argument("Пустой указатель на официанта");
         waiters_.push_back(waiter);
     }
-    // Открывает заказ на столик. Возвращает nullptr, если столика нет, он занят
-    // или официант в этом ресторане не работает.
+    // Открывает заказ на столик. Возвращает nullptr если столика нет, он занят или официант в этом ресторане не работает.
     Order* openOrder(int tableNumber, Waiter* waiter) {
         Table* table = findTable(tableNumber);
         bool isOurWaiter = std::find(waiters_.begin(), waiters_.end(), waiter) != waiters_.end();
@@ -243,8 +240,7 @@ int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
-    // Официантов создаём ДО ресторана: он хранит на них указатели (агрегация),
-    // поэтому они должны пережить ресторан.
+    // Официантов создаём ДО ресторана он хранит на них указатели (агрегация) поэтому они должны пережить ресторан.
     Waiter anna(1, "Анна");
     Waiter ivan(2, "Иван");
     Restaurant restaurant("Уют");
