@@ -1,0 +1,293 @@
+// Ресторан: учёт заказов в зале.
+// Версия 27.10: ассоциативные связи + первое одиночное наследование (MenuItem -> Dish / Drink).
+// Сборка: g++ -std=c++17 -Wall -Wextra restaurant_27_10.cpp -o restaurant
+#include <algorithm>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+#ifdef _WIN32
+#include <windows.h>  // нужен только для SetConsoleOutputCP (русский текст в консоли Windows)
+#endif
+// Сумма в виде "350.00 руб."
+std::string money(double value) {
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(2) << value << " руб.";
+    return out.str();
+}
+// МЕНЮ. Одиночное наследование: MenuItem <- Dish, Drink
+// Абстрактный базовый класс. «Просто позиции меню» не бывает — это всегда блюдо или напиток,
+// поэтому объект MenuItem создать нельзя (в классе есть чисто виртуальные методы).
+class MenuItem {
+public:
+    MenuItem(std::string name, double price) : name_(std::move(name)), price_(price) {
+        if (name_.empty()) throw std::invalid_argument("Название позиции меню не может быть пустым");
+        if (price_ < 0) throw std::invalid_argument("Цена не может быть отрицательной");
+    }
+    // Виртуальный деструктор: позиции хранятся через указатель на базовый класс,
+    // без него при удалении не сработали бы деструкторы наследников.
+    virtual ~MenuItem() = default;
+    const std::string& getName() const { return name_; }
+    double getPrice() const { return price_; }
+    // То, что у блюда и напитка устроено по-разному, реализуют наследники.
+    virtual std::string describe() const = 0;             // описание позиции для меню
+    virtual std::string getPreparationPlace() const = 0;  // где готовится: "Кухня" или "Бар"
+private:
+    std::string name_;
+    double price_;
+};
+// Блюдо: к общим полям добавляет вес и время приготовления.
+class Dish : public MenuItem {
+public:
+    Dish(std::string name, double price, int weightGrams, int cookingMinutes)
+        : MenuItem(std::move(name), price), weightGrams_(weightGrams), cookingMinutes_(cookingMinutes) {
+        if (weightGrams_ <= 0) throw std::invalid_argument("Вес блюда должен быть положительным");
+        if (cookingMinutes_ < 0) throw std::invalid_argument("Время приготовления не может быть отрицательным");
+    }
+    std::string describe() const override {
+        std::ostringstream out;
+        out << "Блюдо: " << getName() << ", " << weightGrams_ << " г, готовится " << cookingMinutes_ << " мин";
+        return out.str();
+    }
+    std::string getPreparationPlace() const override { return "Кухня"; }
+private:
+    int weightGrams_;
+    int cookingMinutes_;
+};
+// Напиток: к общим полям добавляет объём и признак алкоголя.
+class Drink : public MenuItem {
+public:
+    Drink(std::string name, double price, int volumeMl, bool alcoholic)
+        : MenuItem(std::move(name), price), volumeMl_(volumeMl), alcoholic_(alcoholic) {
+        if (volumeMl_ <= 0) throw std::invalid_argument("Объём напитка должен быть положительным");
+    }
+    bool isAlcoholic() const { return alcoholic_; }
+    std::string describe() const override {
+        std::ostringstream out;
+        out << "Напиток: " << getName() << ", " << volumeMl_ << " мл" << (alcoholic_ ? ", алкогольный" : "");
+        return out.str();
+    }
+    std::string getPreparationPlace() const override { return "Бар"; }
+private:
+    int volumeMl_;
+    bool alcoholic_;
+};
+// Меню. КОМПОЗИЦИЯ: меню владеет своими позициями (unique_ptr) — они живут, пока живёт меню.
+class Menu {
+public:
+    const MenuItem* addItem(std::unique_ptr<MenuItem> item) {
+        if (!item) throw std::invalid_argument("Пустая позиция меню");
+        items_.push_back(std::move(item));
+        return items_.back().get();
+    }
+    const MenuItem* findByName(const std::string& name) const {
+        for (const auto& item : items_) {
+            if (item->getName() == name) return item.get();
+        }
+        return nullptr;
+    }
+    void print() const {
+        std::cout << "--- Меню ---\n";
+        for (const auto& item : items_) {
+            // Полиморфизм: для блюда и для напитка вызовется своя версия describe()
+            std::cout << item->describe() << " — " << money(item->getPrice()) << "\n";
+        }
+    }
+private:
+    std::vector<std::unique_ptr<MenuItem>> items_;
+};
+// ЗАЛ: столики и официанты
+class Table {
+public:
+    Table(int number, int seats) : number_(number), seats_(seats) {
+        if (number_ <= 0 || seats_ <= 0) {
+            throw std::invalid_argument("Номер столика и число мест должны быть положительными");
+        }
+    }
+    int getNumber() const { return number_; }
+    int getSeats() const { return seats_; }
+    bool isOccupied() const { return occupied_; }
+    void occupy() { occupied_ = true; }
+    void release() { occupied_ = false; }
+private:
+    int number_;
+    int seats_;
+    bool occupied_ = false;
+};
+class Waiter {
+public:
+    Waiter(int id, std::string name) : id_(id), name_(std::move(name)) {
+        if (name_.empty()) throw std::invalid_argument("Имя официанта не может быть пустым");
+    }
+    int getId() const { return id_; }
+    const std::string& getName() const { return name_; }
+private:
+    int id_;
+    std::string name_;
+};
+// ЗАКАЗ
+// Строка заказа: позиция меню + количество.
+class OrderLine {
+public:
+    OrderLine(const MenuItem* item, int quantity) : item_(item), quantity_(quantity) {}
+    const MenuItem* getItem() const { return item_; }
+    int getQuantity() const { return quantity_; }
+    void increase(int amount) { quantity_ += amount; }
+    double getCost() const { return item_->getPrice() * quantity_; }
+private:
+    const MenuItem* item_;  // АССОЦИАЦИЯ: строка знает позицию меню, но не владеет ею
+    int quantity_;
+};
+class Order {
+public:
+    Order(int id, Table* table, Waiter* waiter) : id_(id), table_(table), waiter_(waiter) {
+        if (!table_ || !waiter_) throw std::invalid_argument("У заказа должны быть столик и официант");
+    }
+    void addItem(const MenuItem* item, int quantity = 1) {
+        if (closed_) throw std::logic_error("Заказ уже закрыт");
+        if (!item) throw std::invalid_argument("Позиция не найдена в меню");
+        if (quantity <= 0) throw std::invalid_argument("Количество должно быть положительным");
+        for (OrderLine& line : lines_) {
+            if (line.getItem() == item) {  // такая позиция уже есть — просто увеличиваем количество
+                line.increase(quantity);
+                return;
+            }
+        }
+        lines_.emplace_back(item, quantity);
+    }
+    double getTotal() const {
+        double total = 0.0;
+        for (const OrderLine& line : lines_) total += line.getCost();
+        return total;
+    }
+    void close() { closed_ = true; }
+    bool isClosed() const { return closed_; }
+    int getId() const { return id_; }
+    Table* getTable() const { return table_; }
+    void print() const {
+        std::cout << "=== Заказ №" << id_ << " | столик " << table_->getNumber()
+                  << " | официант: " << waiter_->getName() << (closed_ ? " | закрыт" : "") << " ===\n";
+        for (const OrderLine& line : lines_) {
+            const MenuItem* item = line.getItem();
+            // Полиморфизм: куда уйдёт позиция (кухня или бар) определяет конкретный наследник
+            std::cout << "[" << item->getPreparationPlace() << "] " << item->getName()
+                      << " x" << line.getQuantity() << " = " << money(line.getCost()) << "\n";
+        }
+        std::cout << "Итого: " << money(getTotal()) << "\n";
+    }
+private:
+    int id_;
+    Table* table_;                  // АССОЦИАЦИЯ: заказ относится к столику, но столик ему не принадлежит
+    Waiter* waiter_;                // АССОЦИАЦИЯ: заказ обслуживает официант
+    std::vector<OrderLine> lines_;  // КОМПОЗИЦИЯ: строки не существуют без своего заказа
+    bool closed_ = false;
+};
+// РЕСТОРАН: собирает всё вместе
+class Restaurant {
+public:
+    explicit Restaurant(std::string name) : name_(std::move(name)) {}
+    const std::string& getName() const { return name_; }
+    Menu& getMenu() { return menu_; }
+    // КОМПОЗИЦИЯ: ресторан сам создаёт столики и владеет ими
+    Table* addTable(int number, int seats) {
+        if (findTable(number)) throw std::invalid_argument("Столик с таким номером уже есть");
+        tables_.push_back(std::make_unique<Table>(number, seats));
+        return tables_.back().get();
+    }
+    // АГРЕГАЦИЯ: ресторан хранит указатели на официантов, но не создаёт и не удаляет их —
+    // официанты существуют сами по себе (могут уйти работать в другой ресторан).
+    void hireWaiter(Waiter* waiter) {
+        if (!waiter) throw std::invalid_argument("Пустой указатель на официанта");
+        waiters_.push_back(waiter);
+    }
+    // Открывает заказ на столик. Возвращает nullptr, если столика нет, он занят
+    // или официант в этом ресторане не работает.
+    Order* openOrder(int tableNumber, Waiter* waiter) {
+        Table* table = findTable(tableNumber);
+        bool isOurWaiter = std::find(waiters_.begin(), waiters_.end(), waiter) != waiters_.end();
+        if (!table || table->isOccupied() || !isOurWaiter) return nullptr;
+        table->occupy();
+        orders_.push_back(std::make_unique<Order>(nextOrderId_++, table, waiter));
+        return orders_.back().get();
+    }
+    // Закрывает заказ и освобождает столик.
+    void closeOrder(Order* order) {
+        if (!order || order->isClosed()) return;
+        order->close();
+        order->getTable()->release();
+    }
+    // Выручка по закрытым заказам.
+    double getRevenue() const {
+        double sum = 0.0;
+        for (const auto& order : orders_) {
+            if (order->isClosed()) sum += order->getTotal();
+        }
+        return sum;
+    }
+private:
+    Table* findTable(int number) const {
+        for (const auto& table : tables_) {
+            if (table->getNumber() == number) return table.get();
+        }
+        return nullptr;
+    }
+    std::string name_;
+    Menu menu_;                                   // КОМПОЗИЦИЯ: меню принадлежит ресторану
+    std::vector<std::unique_ptr<Table>> tables_;  // КОМПОЗИЦИЯ: столики принадлежат ресторану
+    std::vector<Waiter*> waiters_;                // АГРЕГАЦИЯ: официанты живут сами по себе
+    std::vector<std::unique_ptr<Order>> orders_;  // КОМПОЗИЦИЯ: заказы принадлежат ресторану
+    int nextOrderId_ = 1;
+};
+// Демонстрация
+int main() {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+    // Официантов создаём ДО ресторана: он хранит на них указатели (агрегация),
+    // поэтому они должны пережить ресторан.
+    Waiter anna(1, "Анна");
+    Waiter ivan(2, "Иван");
+    Restaurant restaurant("Уют");
+    restaurant.hireWaiter(&anna);
+    restaurant.hireWaiter(&ivan);
+    restaurant.addTable(1, 2);
+    restaurant.addTable(2, 4);
+    restaurant.addTable(3, 6);
+    // В одном меню лежат и блюда, и напитки — все через указатель на MenuItem
+    Menu& menu = restaurant.getMenu();
+    menu.addItem(std::make_unique<Dish>("Борщ", 350.0, 300, 15));
+    menu.addItem(std::make_unique<Dish>("Стейк", 1450.0, 280, 25));
+    menu.addItem(std::make_unique<Drink>("Морс", 180.0, 300, false));
+    menu.addItem(std::make_unique<Drink>("Красное вино", 650.0, 150, true));
+    // MenuItem item("Чай", 100.0);  // не скомпилируется: MenuItem абстрактный
+    menu.print();
+    std::cout << "\n";
+    Order* order1 = restaurant.openOrder(2, &anna);
+    order1->addItem(menu.findByName("Борщ"), 2);
+    order1->addItem(menu.findByName("Стейк"));
+    order1->addItem(menu.findByName("Морс"), 2);
+    order1->addItem(menu.findByName("Красное вино"));
+    order1->print();
+    // Столик 2 уже занят
+    if (!restaurant.openOrder(2, &ivan)) std::cout << "\nСтолик 2 занят, заказ не открыт\n";
+    // Проверки в действии
+    try {
+        order1->addItem(menu.findByName("Борщ"), -1);
+    } catch (const std::invalid_argument& e) {
+        std::cout << "Ошибка: " << e.what() << "\n";
+    }
+    Order* order2 = restaurant.openOrder(1, &ivan);
+    order2->addItem(menu.findByName("Борщ"));
+    order2->addItem(menu.findByName("Морс"));
+    std::cout << "\n";
+    restaurant.closeOrder(order1);
+    restaurant.closeOrder(order2);
+    order1->print();
+    order2->print();
+    std::cout << "\nВыручка: " << money(restaurant.getRevenue()) << "\n";
+    return 0;
+}
